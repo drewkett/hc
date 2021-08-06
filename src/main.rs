@@ -9,16 +9,15 @@ fn pipe(mut in_pipe: impl std::io::Read, mut out_pipe: impl std::io::Write) -> V
             Ok(0) => break,
             Ok(n) => {
                 out.extend(&buf[..n]);
-                loop {
-                    match out[i..].iter().position(|&c| c == b'\n') {
-                        Some(j) => {
-                            if let Err(_e) = out_pipe.write_all(&out[i..i + j + 1]) {
-                                // Not Sure if I should print this error
-                            }
-                            i += j + 1;
+                match out[i..].iter().rev().position(|&c| c == b'\n') {
+                    Some(j) => {
+                        let i_end = out.len() - j;
+                        if let Err(_e) = out_pipe.write_all(&out[i..i_end]) {
+                            // Not Sure if I should print this error
                         }
-                        None => break,
+                        i = i_end;
                     }
+                    None => break,
                 }
             }
             Err(e) => {
