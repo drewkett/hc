@@ -46,6 +46,8 @@ fn pipe(
 }
 
 fn main() {
+    // TODO forward stdin
+    // TODO remote environment variables that are found
     let mut args = std::env::args_os();
     let _ = args.next();
     let mut hc_id = std::env::var_os("HC_ID");
