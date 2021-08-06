@@ -1,6 +1,14 @@
-use std::process::{exit, Command, Stdio};
+use bstr::ByteSlice;
+use std::{
+    fmt::Write,
+    process::{exit, Command, Stdio},
+};
 
-fn pipe(mut in_pipe: impl std::io::Read, mut out_pipe: impl std::io::Write) -> Vec<u8> {
+fn pipe(
+    mut in_pipe: impl std::io::Read,
+    mut out_pipe: impl std::io::Write,
+    tee: bool,
+) -> std::io::Result<Vec<u8>> {
     let mut i = 0;
     let mut out = Vec::new();
     let mut buf = [0; 16 * 1024];
@@ -9,41 +17,96 @@ fn pipe(mut in_pipe: impl std::io::Read, mut out_pipe: impl std::io::Write) -> V
             Ok(0) => break,
             Ok(n) => {
                 out.extend(&buf[..n]);
-                match out[i..].iter().rev().position(|&c| c == b'\n') {
-                    Some(j) => {
-                        let i_end = out.len() - j;
-                        if let Err(_e) = out_pipe.write_all(&out[i..i_end]) {
-                            // Not Sure if I should print this error
+                if tee {
+                    match out[i..].iter().rev().position(|&c| c == b'\n') {
+                        Some(j) => {
+                            let i_end = out.len() - j;
+                            if let Err(_e) = out_pipe.write_all(&out[i..i_end]) {
+                                // Not Sure if I should print this error
+                            }
+                            i = i_end;
                         }
-                        i = i_end;
+                        None => break,
                     }
-                    None => break,
                 }
             }
-            Err(e) => {
-                eprintln!("Error reading stdout: {}", e);
-                break;
-            }
+            Err(e) => return Err(e),
         }
+    }
+    if tee {
         if i < out.len() {
             if let Err(_e) = out_pipe.write_all(&out[i..]) {
                 // Not Sure if I should print this error
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
-    let cmd = match args.next() {
-        Some(cmd) => cmd,
+    let mut hc_id = std::env::var_os("HC_ID");
+    let mut tee = std::env::var_os("HC_TEE").is_some();
+    let mut cmd = loop {
+        if let Some(arg) = args.next() {
+            match arg.to_str() {
+                Some("--hc-id") => hc_id = args.next(),
+                Some("--hc-tee") => tee = true,
+                Some(_cmd) => break Some(arg),
+                None => break None,
+            }
+        }
+    };
+    let hc_id = match hc_id.as_ref().map(|s| s.to_str()) {
+        Some(Some(hc_id)) => hc_id,
+        Some(None) => {
+            eprintln!("Invalid HealthCheck ID given");
+            exit(1);
+        }
         None => {
-            eprintln!("No arguments given");
+            eprintln!("No HealthCheck ID given");
             exit(1);
         }
     };
+    let base_url = {
+        let mut url = "https://hc-ping.com/".to_string();
+        url.push_str(hc_id);
+        url
+    };
+    let start_url = {
+        let mut url = base_url.clone();
+        url.push_str("/start");
+        url
+    };
+    let finish_url = base_url.clone();
+    let error_url = {
+        let mut url = base_url.clone();
+        url.push_str("/fail");
+        url
+    };
+    let finish = |msg: &str, code: i32| -> ! {
+        let url = if code == 0 { &finish_url } else { &error_url };
+        if let Err(_e) = ureq::post(&url).send_string(&msg) {
+            // Not much to do here
+            // Could check return code
+        }
+        exit(code);
+    };
+    let log_and_finish = |msg: &str, code: i32| -> ! {
+        eprintln!("{}", msg);
+        finish(msg, code)
+    };
+    if cmd.is_none() {
+        cmd = args.next()
+    }
+    let cmd = match cmd {
+        Some(cmd) => cmd,
+        None => log_and_finish("No command given to run", 963),
+    };
+    if let Err(_e) = ureq::get(&start_url).call() {
+        // This should log or something
+    }
     let mut proc = match Command::new(cmd)
         .args(args)
         .stdout(Stdio::piped())
@@ -51,31 +114,50 @@ fn main() {
         .spawn()
     {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("Failed to spawn process: {}", e);
-            exit(2);
-        }
+        Err(e) => log_and_finish(&format!("Failed to spawn process: {}", e), 963),
     };
     let child_stdout = proc.stdout.take().unwrap();
     let child_stderr = proc.stderr.take().unwrap();
-    let stdout_thread = std::thread::spawn(move || pipe(child_stdout, std::io::stdout()));
-    let stderr_thread = std::thread::spawn(move || pipe(child_stderr, std::io::stderr()));
+    let stdout_thread = std::thread::spawn(move || pipe(child_stdout, std::io::stdout(), tee));
+    let stderr_thread = std::thread::spawn(move || pipe(child_stderr, std::io::stderr(), tee));
     match proc.wait() {
         Ok(status) => {
-            let code = status.code().unwrap_or(963);
-            let _out = match stdout_thread.join() {
-                Ok(out) => out,
+            let out = match stdout_thread.join() {
+                Ok(Ok(out)) => out,
+                Ok(Err(e)) => finish(&format!("Error reading stdout from child: {}", e), 693),
                 Err(e) => std::panic::resume_unwind(e),
             };
-            let _err = match stderr_thread.join() {
-                Ok(err) => err,
+            let err = match stderr_thread.join() {
+                Ok(Ok(err)) => err,
+                Ok(Err(e)) => finish(&format!("Error reading stderr from child: {}", e), 693),
                 Err(e) => std::panic::resume_unwind(e),
             };
-            exit(code)
+            let mut msg = String::new();
+            let code = match status.code() {
+                Some(code) => {
+                    if let Err(_e) = writeln!(msg, "Command exited with exit code {}", code) {
+                        // Not sure what to do here, but should only fail on out of memory i assume
+                    }
+                    code
+                }
+                None => {
+                    msg.push_str("Command exited without an exit code\n");
+                    963
+                }
+            };
+            if !out.is_empty() {
+                let _ = writeln!(msg, "stdout:");
+                let _ = writeln!(msg, "{}", out.as_bstr());
+            }
+            if !err.is_empty() {
+                if !out.is_empty() {
+                    let _ = writeln!(msg, "");
+                }
+                let _ = writeln!(msg, "stderr:");
+                let _ = writeln!(msg, "{}", err.as_bstr());
+            }
+            finish(&msg, code)
         }
-        Err(e) => {
-            eprintln!("Failed waiting for process: {}", e);
-            exit(3)
-        }
+        Err(e) => log_and_finish(&format!("Failed waiting for process: {}", e), 963),
     }
 }
