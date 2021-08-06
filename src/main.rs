@@ -4,6 +4,8 @@ use std::{
     process::{exit, Command, Stdio},
 };
 
+const EXIT_CODE: i32 = 963;
+
 fn pipe(
     mut in_pipe: impl std::io::Read,
     mut out_pipe: impl std::io::Write,
@@ -102,7 +104,7 @@ fn main() {
     }
     let cmd = match cmd {
         Some(cmd) => cmd,
-        None => log_and_finish("No command given to run", 963),
+        None => log_and_finish("No command given to run", EXIT_CODE),
     };
     if let Err(_e) = ureq::get(&start_url).call() {
         // This should log or something
@@ -114,7 +116,7 @@ fn main() {
         .spawn()
     {
         Ok(p) => p,
-        Err(e) => log_and_finish(&format!("Failed to spawn process: {}", e), 963),
+        Err(e) => log_and_finish(&format!("Failed to spawn process: {}", e), EXIT_CODE),
     };
     let child_stdout = proc.stdout.take().unwrap();
     let child_stderr = proc.stderr.take().unwrap();
@@ -142,7 +144,7 @@ fn main() {
                 }
                 None => {
                     msg.push_str("Command exited without an exit code\n");
-                    963
+                    EXIT_CODE
                 }
             };
             if !out.is_empty() {
@@ -158,6 +160,6 @@ fn main() {
             }
             finish(&msg, code)
         }
-        Err(e) => log_and_finish(&format!("Failed waiting for process: {}", e), 963),
+        Err(e) => log_and_finish(&format!("Failed waiting for process: {}", e), EXIT_CODE),
     }
 }
