@@ -51,13 +51,15 @@ fn main() {
     let mut hc_id = std::env::var_os("HC_ID");
     let mut tee = std::env::var_os("HC_TEE").is_some();
     let mut cmd = loop {
-        if let Some(arg) = args.next() {
-            match arg.to_str() {
+        match args.next() {
+            Some(arg) => match arg.to_str() {
                 Some("--hc-id") => hc_id = args.next(),
                 Some("--hc-tee") => tee = true,
                 Some(_cmd) => break Some(arg),
+                // TODO Handle more elegantly
                 None => break None,
-            }
+            },
+            None => break None,
         }
     };
     let hc_id = match hc_id.as_ref().map(|s| s.to_str()) {
