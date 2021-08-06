@@ -12,10 +12,10 @@ fn pipe(mut in_pipe: impl std::io::Read, mut out_pipe: impl std::io::Write) -> V
                 loop {
                     match out[i..].iter().position(|&c| c == b'\n') {
                         Some(j) => {
-                            i += j + 1;
                             if let Err(_e) = out_pipe.write_all(&out[i..i + j + 1]) {
                                 // Not Sure if I should print this error
                             }
+                            i += j + 1;
                         }
                         None => break,
                     }
@@ -37,6 +37,7 @@ fn pipe(mut in_pipe: impl std::io::Read, mut out_pipe: impl std::io::Write) -> V
 
 fn main() {
     let mut args = std::env::args_os();
+    let _ = args.next();
     let cmd = match args.next() {
         Some(cmd) => cmd,
         None => {
