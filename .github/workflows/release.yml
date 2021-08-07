@@ -147,9 +147,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "windows-2019" ]; then
-            echo "ASSET=target/${{ matrix.target }}/release/hc.exe" >> $GITHUB_ENV
+            echo "ASSET_PATH=target/${{ matrix.target }}/release/hc.exe" >> $GITHUB_ENV
+            echo "ASSET_NAME=hc-${{ matrix.target }}.exe" >> $GITHUB_ENV
           else
-            echo "ASSET=target/${{ matrix.target }}/release/hc" >> $GITHUB_ENV
+            echo "ASSET_PATH=target/${{ matrix.target }}/release/hc" >> $GITHUB_ENV
+            echo "ASSET_NAME=hc-${{ matrix.target }}" >> $GITHUB_ENV
           fi
 
       - name: Upload release archive
