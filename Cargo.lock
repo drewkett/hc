@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "hc"
-version = "0.1.0-dev2"
+version = "0.1.0"
 dependencies = [
  "bstr",
  "ureq",
