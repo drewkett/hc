@@ -1,5 +1,7 @@
 use bstr::ByteSlice;
 use std::{
+    collections::HashMap,
+    ffi::OsString,
     fmt::Write,
     process::{exit, Command, Stdio},
 };
@@ -23,8 +25,8 @@ fn pipe(
                     match out[i..].iter().rev().position(|&c| c == b'\n') {
                         Some(j) => {
                             let i_end = out.len() - j;
-                            if let Err(_e) = out_pipe.write_all(&out[i..i_end]) {
-                                // Not Sure if I should print this error
+                            if let Err(e) = out_pipe.write_all(&out[i..i_end]) {
+                                eprintln!("Error writing to output stream: {}", e)
                             }
                             i = i_end;
                         }
@@ -37,8 +39,8 @@ fn pipe(
     }
     if tee {
         if i < out.len() {
-            if let Err(_e) = out_pipe.write_all(&out[i..]) {
-                // Not Sure if I should print this error
+            if let Err(e) = out_pipe.write_all(&out[i..]) {
+                eprintln!("Error writing to output stream: {}", e)
             }
         }
     }
@@ -46,20 +48,19 @@ fn pipe(
 }
 
 fn main() {
-    // TODO forward stdin
-    // TODO remote environment variables that are found
     let mut args = std::env::args_os();
     let _ = args.next();
     let mut hc_id = std::env::var_os("HC_ID");
     let mut tee = std::env::var_os("HC_TEE").is_some();
+    let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
+        .filter(|&(ref k, _)| k == "HC_ID" || k == "HC_TEE")
+        .collect();
     let mut cmd = loop {
         match args.next() {
             Some(arg) => match arg.to_str() {
                 Some("--hc-id") => hc_id = args.next(),
                 Some("--hc-tee") => tee = true,
-                Some(_cmd) => break Some(arg),
-                // TODO Handle more elegantly
-                None => break None,
+                _ => break Some(arg),
             },
             None => break None,
         }
@@ -93,9 +94,9 @@ fn main() {
     };
     let finish = |msg: &str, code: i32| -> ! {
         let url = if code == 0 { &finish_url } else { &error_url };
-        if let Err(_e) = ureq::post(&url).send_string(&msg) {
-            // Not much to do here
-            // Could check return code
+        if let Err(e) = ureq::post(&url).send_string(&msg) {
+            eprintln!("Error sending finishing request to healthchecks: {}", e);
+            exit(EXIT_CODE)
         }
         exit(code);
     };
@@ -110,11 +111,14 @@ fn main() {
         Some(cmd) => cmd,
         None => log_and_finish("No command given to run", EXIT_CODE),
     };
-    if let Err(_e) = ureq::get(&start_url).call() {
-        // This should log or something
+    if let Err(e) = ureq::get(&start_url).call() {
+        eprintln!("Error on healthchecks /start call: {}", e);
     }
     let mut proc = match Command::new(cmd)
         .args(args)
+        .env_clear()
+        .envs(filtered_env)
+        .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -141,8 +145,8 @@ fn main() {
             let mut msg = String::new();
             let code = match status.code() {
                 Some(code) => {
-                    if let Err(_e) = writeln!(msg, "Command exited with exit code {}", code) {
-                        // Not sure what to do here, but should only fail on out of memory i assume
+                    if let Err(e) = writeln!(msg, "Command exited with exit code {}", code) {
+                        eprintln!("Write to message buffer failed: {}", e)
                     }
                     code
                 }
