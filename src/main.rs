@@ -92,7 +92,7 @@ fn main() {
         url.push_str("/fail");
         url
     };
-    let finish = |msg: &str, code: i32| -> ! {
+    let post_and_exit = |msg: &str, code: i32| -> ! {
         let url = if code == 0 { &finish_url } else { &error_url };
         if let Err(e) = ureq::post(&url).send_string(&msg) {
             eprintln!("Error sending finishing request to healthchecks: {}", e);
@@ -100,16 +100,16 @@ fn main() {
         }
         exit(code);
     };
-    let log_and_finish = |msg: &str, code: i32| -> ! {
+    let log_post_and_exit = |msg: &str, code: i32| -> ! {
         eprintln!("{}", msg);
-        finish(msg, code)
+        post_and_exit(msg, code)
     };
     if cmd.is_none() {
         cmd = args.next()
     }
     let cmd = match cmd {
         Some(cmd) => cmd,
-        None => log_and_finish("No command given to run", EXIT_CODE),
+        None => log_post_and_exit("No command given to run", EXIT_CODE),
     };
     if let Err(e) = ureq::get(&start_url).call() {
         eprintln!("Error on healthchecks /start call: {}", e);
@@ -124,7 +124,7 @@ fn main() {
         .spawn()
     {
         Ok(p) => p,
-        Err(e) => log_and_finish(&format!("Failed to spawn process: {}", e), EXIT_CODE),
+        Err(e) => log_post_and_exit(&format!("Failed to spawn process: {}", e), EXIT_CODE),
     };
     let child_stdout = proc.stdout.take().unwrap();
     let child_stderr = proc.stderr.take().unwrap();
@@ -134,12 +134,16 @@ fn main() {
         Ok(status) => {
             let out = match stdout_thread.join() {
                 Ok(Ok(out)) => out,
-                Ok(Err(e)) => finish(&format!("Error reading stdout from child: {}", e), 693),
+                Ok(Err(e)) => {
+                    post_and_exit(&format!("Error reading stdout from child: {}", e), 693)
+                }
                 Err(e) => std::panic::resume_unwind(e),
             };
             let err = match stderr_thread.join() {
                 Ok(Ok(err)) => err,
-                Ok(Err(e)) => finish(&format!("Error reading stderr from child: {}", e), 693),
+                Ok(Err(e)) => {
+                    post_and_exit(&format!("Error reading stderr from child: {}", e), 693)
+                }
                 Err(e) => std::panic::resume_unwind(e),
             };
             let mut msg = String::new();
@@ -166,8 +170,8 @@ fn main() {
                 let _ = writeln!(msg, "stderr:");
                 let _ = writeln!(msg, "{}", err.as_bstr());
             }
-            finish(&msg, code)
+            post_and_exit(&msg, code)
         }
-        Err(e) => log_and_finish(&format!("Failed waiting for process: {}", e), EXIT_CODE),
+        Err(e) => log_post_and_exit(&format!("Failed waiting for process: {}", e), EXIT_CODE),
     }
 }
