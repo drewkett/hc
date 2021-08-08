@@ -93,6 +93,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Get the release version from the tag
+        shell: bash
+        if: env.BIN_VERSION == ''
+        run: |
+          # Apparently, this is the right way to get a tag name. Really?
+          #
+          # See: https://github.community/t5/GitHub-Actions/How-to-get-just-the-tag-name/m-p/32167/highlight/true#M1027
+          echo "BIN_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          echo "version is: ${{ env.BIN_VERSION }}"
+
       - name: Install packages (Ubuntu)
         if: matrix.os == 'ubuntu-18.04'
         run: |
