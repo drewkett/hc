@@ -4,10 +4,18 @@ with a non-zero return. It will also include the output from stdout and stderr
 from the command to healthchecks
 
 ```
-hc [--hc-id ID] [--hc-tee] cmd [arg]...
-
---hc-id ID   This is used to pass in the healthcheck id. This can also be done using the environment variable HC_ID. The command line value takes precedence
---hc-tee     This enables the output from the command to be printed to stdout and stderr in addition to forwarding it to healthchecks. This can also be specified with the environment variable HC_TEE. It just checks for the existence of the environment variable without checking the value
+hc [--hc-id HC_ID] [--hc-tee] [cmd [args...]]
+    
+    HC_ID can be set using an environment variable
+    --hc-id HC_ID   Sets the healthchecks id. This can also be set using the
+                    environment variable HC_ID
+    --hc-tee        Controls whether to also output the cmd stdout/stderr to the local
+                    stdout/stderr. By default the output from the cmd will only get
+                    passed as text to healthchecks. This option can also be enabled
+                    using the environment variable HC_TEE. Only the existance of the 
+                    variable is checked
+    [cmd [args...]] If no command is passed, the healthcheck will be notified as a 
+                    success with the text 'No command given'
 ```
 
 # Build Instructions

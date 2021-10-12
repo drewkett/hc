@@ -37,16 +37,69 @@ fn pipe(
             Err(e) => return Err(e),
         }
     }
-    if tee {
-        if i < out.len() {
-            if let Err(e) = out_pipe.write_all(&out[i..]) {
-                eprintln!("Error writing to output stream: {}", e)
-            }
+    if tee && i < out.len() {
+        if let Err(e) = out_pipe.write_all(&out[i..]) {
+            eprintln!("Error writing to output stream: {}", e)
         }
     }
     Ok(out)
 }
 
+fn hex_range(rng: &[u8]) -> bool {
+    rng.iter()
+        .all(|b| matches!(b, b'0'..=b'9'|b'a'..=b'z'|b'A'..=b'Z'))
+}
+
+fn valid_uuid(uuid: &str) -> bool {
+    let uuid = uuid.as_bytes();
+    if uuid.len() != 36 {
+        return false;
+    }
+    if !hex_range(&uuid[..8]) {
+        return false;
+    }
+    if uuid[8] != b'-' {
+        return false;
+    }
+    if !hex_range(&uuid[9..13]) {
+        return false;
+    }
+    if uuid[13] != b'-' {
+        return false;
+    }
+    if !hex_range(&uuid[14..18]) {
+        return false;
+    }
+    if uuid[18] != b'-' {
+        return false;
+    }
+    if !hex_range(&uuid[19..23]) {
+        return false;
+    }
+    if uuid[23] != b'-' {
+        return false;
+    }
+    hex_range(&uuid[24..])
+}
+
+fn print_help() {
+    eprintln!(
+        "\
+hc [--hc-id HC_ID] [--hc-tee] [cmd [args...]]
+
+    HC_ID can be set using an environment variable
+    --hc-id HC_ID   Sets the healthchecks id. This can also be set using the
+                    environment variable HC_ID
+    --hc-tee        Controls whether to also output the cmd stdout/stderr to the local
+                    stdout/stderr. By default the output from the cmd will only get
+                    passed as text to healthchecks. This option can also be enabled
+                    using the environment variable HC_TEE. Only the existance of the
+                    variable is checked
+    [cmd [args...]] If no command is passed, the healthcheck will be notified as a
+                    success with the text 'No command given'
+"
+    )
+}
 fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
@@ -65,14 +118,23 @@ fn main() {
             None => break None,
         }
     };
-    let hc_id = match hc_id.as_ref().map(|s| s.to_str()) {
-        Some(Some(hc_id)) => hc_id,
-        Some(None) => {
-            eprintln!("Invalid HealthCheck ID given");
-            exit(1);
-        }
+    let hc_id = match hc_id.as_ref() {
+        Some(hc_id) => match hc_id.to_str() {
+            Some(hc_id) if valid_uuid(hc_id) => hc_id,
+            Some(hc_id) => {
+                eprintln!("Healthcheck Id isn't a valid uuid '{}'", hc_id);
+                print_help();
+                exit(1);
+            }
+            None => {
+                let hc_id: &std::path::Path = hc_id.as_ref();
+                eprintln!("Healthcheck Id isn't valid utf-8 '{}'", hc_id.display());
+                exit(1);
+            }
+        },
         None => {
-            eprintln!("No HealthCheck ID given");
+            eprintln!("No Healthcheck Id given");
+            print_help();
             exit(1);
         }
     };
@@ -88,13 +150,13 @@ fn main() {
     };
     let finish_url = base_url.clone();
     let error_url = {
-        let mut url = base_url.clone();
+        let mut url = base_url;
         url.push_str("/fail");
         url
     };
     let post_and_exit = |msg: &str, code: i32| -> ! {
         let url = if code == 0 { &finish_url } else { &error_url };
-        if let Err(e) = ureq::post(&url).send_string(&msg) {
+        if let Err(e) = ureq::post(url).send_string(msg) {
             eprintln!("Error sending finishing request to healthchecks: {}", e);
             exit(EXIT_CODE)
         }
@@ -109,7 +171,7 @@ fn main() {
     }
     let cmd = match cmd {
         Some(cmd) => cmd,
-        None => log_post_and_exit("No command given to run", EXIT_CODE),
+        None => log_post_and_exit("No command given", 0),
     };
     if let Err(e) = ureq::get(&start_url).call() {
         eprintln!("Error on healthchecks /start call: {}", e);
@@ -165,7 +227,7 @@ fn main() {
             }
             if !err.is_empty() {
                 if !out.is_empty() {
-                    let _ = writeln!(msg, "");
+                    let _ = writeln!(msg);
                 }
                 let _ = writeln!(msg, "stderr:");
                 let _ = writeln!(msg, "{}", err.as_bstr());
