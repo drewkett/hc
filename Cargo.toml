@@ -9,12 +9,3 @@ edition = "2018"
 [dependencies]
 bstr = "0.2"
 ureq = "2"
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-Ctarget-feature=+crt-static"]
-
-[target.i686-pc-windows-msvc]
-rustflags = ["-Ctarget-feature=+crt-static"]
-
-[target.i586-pc-windows-msvc]
-rustflags = ["-Ctarget-feature=+crt-static"]
