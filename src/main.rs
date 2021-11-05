@@ -85,18 +85,19 @@ fn valid_uuid(uuid: &str) -> bool {
 fn print_help() {
     eprintln!(
         "\
-hc [--hc-id HC_ID] [--hc-tee] [cmd [args...]]
+hc [--hc-id HC_ID] [--hc-tee] [--hc-ignore-code] [cmd [args...]]
 
     HC_ID can be set using an environment variable
-    --hc-id HC_ID   Sets the healthchecks id. This can also be set using the
-                    environment variable HC_ID
-    --hc-tee        Controls whether to also output the cmd stdout/stderr to the local
-                    stdout/stderr. By default the output from the cmd will only get
-                    passed as text to healthchecks. This option can also be enabled
-                    using the environment variable HC_TEE. Only the existance of the
-                    variable is checked
-    [cmd [args...]] If no command is passed, the healthcheck will be notified as a
-                    success with the text 'No command given'
+    --hc-id HC_ID    Sets the healthchecks id. This can also be set using the
+                     environment variable HC_ID
+    --hc-ignore-code Ignore the return code from cmd. Also available using HC_IGNORE_CODE
+    --hc-tee         Controls whether to also output the cmd stdout/stderr to the local
+                     stdout/stderr. By default the output from the cmd will only get
+                     passed as text to healthchecks. This option can also be enabled
+                     using the environment variable HC_TEE. Only the existance of the
+                     variable is checked
+    [cmd [args...]]  If no command is passed, the healthcheck will be notified as a
+                     success with the text 'No command given'
 "
     )
 }
@@ -104,6 +105,7 @@ fn main() {
     let mut args = std::env::args_os();
     let _ = args.next();
     let mut hc_id = std::env::var_os("HC_ID");
+    let mut ignore_code = std::env::var_os("HC_IGNORE_CODE").is_some();
     let mut tee = std::env::var_os("HC_TEE").is_some();
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
         .filter(|&(ref k, _)| k != "HC_ID" && k != "HC_TEE")
@@ -113,6 +115,7 @@ fn main() {
             Some(arg) => match arg.to_str() {
                 Some("--hc-id") => hc_id = args.next(),
                 Some("--hc-tee") => tee = true,
+                Some("--hc-ignore-code") => ignore_code = true,
                 _ => break Some(arg),
             },
             None => break None,
@@ -209,7 +212,7 @@ fn main() {
                 Err(e) => std::panic::resume_unwind(e),
             };
             let mut msg = String::new();
-            let code = match status.code() {
+            let mut code = match status.code() {
                 Some(code) => {
                     if let Err(e) = writeln!(msg, "Command exited with exit code {}", code) {
                         eprintln!("Write to message buffer failed: {}", e)
@@ -231,6 +234,10 @@ fn main() {
                 }
                 let _ = writeln!(msg, "stderr:");
                 let _ = writeln!(msg, "{}", err.as_bstr());
+            }
+            if ignore_code {
+                // 0 would indicate success
+                code = 0;
             }
             post_and_exit(&msg, code)
         }
