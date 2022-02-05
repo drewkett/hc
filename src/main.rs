@@ -14,7 +14,7 @@ fn read_to_end_tee(
     mut rdr: impl std::io::Read,
     mut wrtr: Option<impl std::io::Write>,
 ) -> std::io::Result<Vec<u8>> {
-    // This tracks the position in the out buffer that has been already forwarded to 
+    // This tracks the position in the out buffer that has been already forwarded to
     // wrtr, when a wrtr is passed
     let mut out_position = 0;
     // Buffer to return which captures all the data from rdr
@@ -28,15 +28,15 @@ fn read_to_end_tee(
                 let read_contents = &buf[..n];
                 out.extend(read_contents);
                 if let Some(ref mut wrtr) = wrtr {
-                    // Only write contents up to last new line. Since both stdout and 
-                    // stderr can be writing at the same time, attempt to line buffer 
+                    // Only write contents up to last new line. Since both stdout and
+                    // stderr can be writing at the same time, attempt to line buffer
                     // to make output look nicer
                     // remaining is all the data that has been read to out but not yet
                     // written to wrtr
                     let remaining = &out[out_position..];
                     match remaining.iter().rev().position(|&c| c == b'\n') {
                         Some(j) => {
-                            let to_write = &remaining[..out.len()-j];
+                            let to_write = &remaining[..out.len() - j];
                             if let Err(e) = wrtr.write_all(to_write) {
                                 eprintln!("Error writing to output stream: {}", e)
                             }
@@ -61,43 +61,6 @@ fn read_to_end_tee(
     Ok(out)
 }
 
-fn hex_range(rng: &[u8]) -> bool {
-    rng.iter()
-        .all(|b| matches!(b, b'0'..=b'9'|b'a'..=b'z'|b'A'..=b'Z'))
-}
-
-fn valid_uuid(uuid: &str) -> bool {
-    let uuid = uuid.as_bytes();
-    if uuid.len() != 36 {
-        return false;
-    }
-    if !hex_range(&uuid[..8]) {
-        return false;
-    }
-    if uuid[8] != b'-' {
-        return false;
-    }
-    if !hex_range(&uuid[9..13]) {
-        return false;
-    }
-    if uuid[13] != b'-' {
-        return false;
-    }
-    if !hex_range(&uuid[14..18]) {
-        return false;
-    }
-    if uuid[18] != b'-' {
-        return false;
-    }
-    if !hex_range(&uuid[19..23]) {
-        return false;
-    }
-    if uuid[23] != b'-' {
-        return false;
-    }
-    hex_range(&uuid[24..])
-}
-
 fn print_help() {
     eprintln!(
         "\
@@ -117,16 +80,115 @@ hc [--hc-id HC_ID] [--hc-tee] [--hc-ignore-code] [cmd [args...]]
 "
     )
 }
+
+mod internal {
+    use std::process::exit;
+    const EXIT_CODE: i32 = 963;
+
+    /// Check if buf is only valid hex characters
+    fn is_hex(buf: &[u8]) -> bool {
+        buf.iter()
+            .all(|b| matches!(b, b'0'..=b'9'|b'a'..=b'z'|b'A'..=b'Z'))
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Uuid([u8; 36]);
+
+    impl Uuid {
+        pub fn from_str(s: &str) -> Option<Self> {
+            if s.len() != 36 {
+                return None;
+            }
+            let mut uuid = [0; 36];
+            uuid.copy_from_slice(s.as_bytes());
+            if is_hex(&uuid[..8])
+                && uuid[8] == b'-'
+                && is_hex(&uuid[9..13])
+                && uuid[13] == b'-'
+                && is_hex(&uuid[14..18])
+                && uuid[18] == b'-'
+                && is_hex(&uuid[19..23])
+                && uuid[23] == b'-'
+                && is_hex(&uuid[24..])
+            {
+                Some(Self(uuid))
+            } else {
+                None
+            }
+        }
+
+        fn as_str(&self) -> &str {
+            // SAFETY: Uuid can only be created with from_str and it checks for
+            // valid utf-8 characters
+            unsafe { std::str::from_utf8_unchecked(&self.0) }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct HealthCheck(Uuid);
+
+    impl HealthCheck {
+        pub fn from_str(s: &str) -> Option<Self> {
+            Uuid::from_str(s).map(Self)
+        }
+
+        fn base_url(&self) -> String {
+            let mut url = "https://hc-ping.com/".to_string();
+            url.push_str(self.0.as_str());
+            url
+        }
+
+        fn start_url(&self) -> String {
+            let mut url = self.base_url();
+            url.push_str("/start");
+            url
+        }
+
+        fn finish_url(&self) -> String {
+            self.base_url()
+        }
+
+        fn fail_url(&self) -> String {
+            let mut url = self.base_url();
+            url.push_str("/fail");
+            url
+        }
+
+        pub fn start(&self) {
+            if let Err(e) = ureq::get(&self.start_url()).call() {
+                eprintln!("Error on healthchecks /start call: {}", e);
+            }
+        }
+
+        pub fn finish_and_exit(&self, msg: &str, code: i32, log: bool) -> ! {
+            let url = if code == 0 {
+                self.finish_url()
+            } else {
+                self.fail_url()
+            };
+            if log {
+                eprintln!("{}", msg);
+            }
+            if let Err(e) = ureq::post(&url).send_string(msg) {
+                eprintln!("Error sending finishing request to healthchecks: {}", e);
+                exit(EXIT_CODE)
+            }
+            exit(code)
+        }
+    }
+}
+
+use internal::HealthCheck;
+
 fn main() {
-    let mut args = std::env::args_os();
-    let _ = args.next();
+    let mut args = std::env::args_os().skip(1);
     let mut hc_id = std::env::var_os("HC_ID");
     let mut ignore_code = std::env::var_os("HC_IGNORE_CODE").is_some();
     let mut tee = std::env::var_os("HC_TEE").is_some();
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
         .filter(|&(ref k, _)| k != "HC_ID" && k != "HC_TEE")
         .collect();
-    let mut cmd = loop {
+    let cmd = loop {
         match args.next() {
             Some(arg) => match arg.to_str() {
                 Some("--hc-id") => hc_id = args.next(),
@@ -137,17 +199,12 @@ fn main() {
             None => break None,
         }
     };
-    let hc_id = match hc_id.as_ref() {
-        Some(hc_id) => match hc_id.to_str() {
-            Some(hc_id) if valid_uuid(hc_id) => hc_id,
-            Some(hc_id) => {
-                eprintln!("Healthcheck Id isn't a valid uuid '{}'", hc_id);
-                print_help();
-                exit(1);
-            }
+    let hc = match hc_id.as_ref() {
+        Some(hc_id) => match hc_id.to_str().and_then(HealthCheck::from_str) {
+            Some(hc_id) => hc_id,
             None => {
                 let hc_id: &std::path::Path = hc_id.as_ref();
-                eprintln!("Healthcheck Id isn't valid utf-8 '{}'", hc_id.display());
+                eprintln!("Healthcheck Id isn't a valid uuid '{}'", hc_id.display());
                 exit(1);
             }
         },
@@ -157,44 +214,12 @@ fn main() {
             exit(1);
         }
     };
-    let base_url = {
-        let mut url = "https://hc-ping.com/".to_string();
-        url.push_str(hc_id);
-        url
-    };
-    let start_url = {
-        let mut url = base_url.clone();
-        url.push_str("/start");
-        url
-    };
-    let finish_url = base_url.clone();
-    let error_url = {
-        let mut url = base_url;
-        url.push_str("/fail");
-        url
-    };
-    let post_and_exit = |msg: &str, code: i32| -> ! {
-        let url = if code == 0 { &finish_url } else { &error_url };
-        if let Err(e) = ureq::post(url).send_string(msg) {
-            eprintln!("Error sending finishing request to healthchecks: {}", e);
-            exit(EXIT_CODE)
-        }
-        exit(code);
-    };
-    let log_post_and_exit = |msg: &str, code: i32| -> ! {
-        eprintln!("{}", msg);
-        post_and_exit(msg, code)
-    };
-    if cmd.is_none() {
-        cmd = args.next()
-    }
+    let cmd = cmd.or_else(|| args.next());
     let cmd = match cmd {
         Some(cmd) => cmd,
-        None => log_post_and_exit("No command given", 0),
+        None => hc.finish_and_exit("No command given", 0, true),
     };
-    if let Err(e) = ureq::get(&start_url).call() {
-        eprintln!("Error on healthchecks /start call: {}", e);
-    }
+    hc.start();
     let mut proc = match Command::new(cmd)
         .args(args)
         .env_clear()
@@ -205,7 +230,7 @@ fn main() {
         .spawn()
     {
         Ok(p) => p,
-        Err(e) => log_post_and_exit(&format!("Failed to spawn process: {}", e), EXIT_CODE),
+        Err(e) => hc.finish_and_exit(&format!("Failed to spawn process: {}", e), EXIT_CODE, true),
     };
 
     let child_stdout = proc.stdout.take().unwrap();
@@ -223,16 +248,20 @@ fn main() {
         Ok(status) => {
             let out = match stdout_thread.join() {
                 Ok(Ok(out)) => out,
-                Ok(Err(e)) => {
-                    post_and_exit(&format!("Error reading stdout from child: {}", e), 693)
-                }
+                Ok(Err(e)) => hc.finish_and_exit(
+                    &format!("Error reading stdout from child: {}", e),
+                    693,
+                    false,
+                ),
                 Err(e) => std::panic::resume_unwind(e),
             };
             let err = match stderr_thread.join() {
                 Ok(Ok(err)) => err,
-                Ok(Err(e)) => {
-                    post_and_exit(&format!("Error reading stderr from child: {}", e), 693)
-                }
+                Ok(Err(e)) => hc.finish_and_exit(
+                    &format!("Error reading stderr from child: {}", e),
+                    693,
+                    false,
+                ),
                 Err(e) => std::panic::resume_unwind(e),
             };
             let mut msg = String::new();
@@ -263,8 +292,11 @@ fn main() {
                 // 0 would indicate success
                 code = 0;
             }
-            post_and_exit(&msg, code)
+            hc.finish_and_exit(&msg, code, false)
         }
-        Err(e) => log_post_and_exit(&format!("Failed waiting for process: {}", e), EXIT_CODE),
+        Err(e) => {
+            let msg = format!("Failed waiting for process: {}", e);
+            hc.finish_and_exit(&msg, EXIT_CODE, true)
+        }
     }
 }
