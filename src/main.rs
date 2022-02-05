@@ -8,26 +8,39 @@ use std::{
 
 const EXIT_CODE: i32 = 963;
 
-fn pipe(
-    mut in_pipe: impl std::io::Read,
-    mut out_pipe: Option<impl std::io::Write>,
+/// This reads the rdr to the end and returns the data as a Vec. If a wrtr is passed
+/// in, also copy all data to wrtr
+fn read_to_end_tee(
+    mut rdr: impl std::io::Read,
+    mut wrtr: Option<impl std::io::Write>,
 ) -> std::io::Result<Vec<u8>> {
-    let mut i = 0;
+    // This tracks the position in the out buffer that has been already forwarded to 
+    // wrtr, when a wrtr is passed
+    let mut out_position = 0;
+    // Buffer to return which captures all the data from rdr
     let mut out = Vec::new();
+    // Temporary buffer used for read data
     let mut buf = [0; 16 * 1024];
     loop {
-        match in_pipe.read(&mut buf) {
+        match rdr.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                out.extend(&buf[..n]);
-                if let Some(ref mut out_pipe) = out_pipe {
-                    match out[i..].iter().rev().position(|&c| c == b'\n') {
+                let read_contents = &buf[..n];
+                out.extend(read_contents);
+                if let Some(ref mut wrtr) = wrtr {
+                    // Only write contents up to last new line. Since both stdout and 
+                    // stderr can be writing at the same time, attempt to line buffer 
+                    // to make output look nicer
+                    // remaining is all the data that has been read to out but not yet
+                    // written to wrtr
+                    let remaining = &out[out_position..];
+                    match remaining.iter().rev().position(|&c| c == b'\n') {
                         Some(j) => {
-                            let i_end = out.len() - j;
-                            if let Err(e) = out_pipe.write_all(&out[i..i_end]) {
+                            let to_write = &remaining[..out.len()-j];
+                            if let Err(e) = wrtr.write_all(to_write) {
                                 eprintln!("Error writing to output stream: {}", e)
                             }
-                            i = i_end;
+                            out_position += to_write.len();
                         }
                         None => break,
                     }
@@ -36,9 +49,11 @@ fn pipe(
             Err(e) => return Err(e),
         }
     }
-    if let Some(ref mut out_pipe) = out_pipe {
-        if i < out.len() {
-            if let Err(e) = out_pipe.write_all(&out[i..]) {
+    if let Some(ref mut wrtr) = wrtr {
+        // The read has finished, so write all remaining data to wrtr if exists
+        if out_position < out.len() {
+            let remaining = &out[out_position..];
+            if let Err(e) = wrtr.write_all(remaining) {
                 eprintln!("Error writing to output stream: {}", e)
             }
         }
@@ -201,8 +216,8 @@ fn main() {
 
     // Spawn threads for continuously reading from the child process's stdout and stderr. If
     // tee is enabled forward the output to the processes pipes
-    let stdout_thread = std::thread::spawn(move || pipe(child_stdout, pipe_stdout));
-    let stderr_thread = std::thread::spawn(move || pipe(child_stderr, pipe_stderr));
+    let stdout_thread = std::thread::spawn(move || read_to_end_tee(child_stdout, pipe_stdout));
+    let stderr_thread = std::thread::spawn(move || read_to_end_tee(child_stderr, pipe_stderr));
 
     match proc.wait() {
         Ok(status) => {
