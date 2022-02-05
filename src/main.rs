@@ -10,8 +10,7 @@ const EXIT_CODE: i32 = 963;
 
 fn pipe(
     mut in_pipe: impl std::io::Read,
-    mut out_pipe: impl std::io::Write,
-    tee: bool,
+    mut out_pipe: Option<impl std::io::Write>,
 ) -> std::io::Result<Vec<u8>> {
     let mut i = 0;
     let mut out = Vec::new();
@@ -21,7 +20,7 @@ fn pipe(
             Ok(0) => break,
             Ok(n) => {
                 out.extend(&buf[..n]);
-                if tee {
+                if let Some(ref mut out_pipe) = out_pipe {
                     match out[i..].iter().rev().position(|&c| c == b'\n') {
                         Some(j) => {
                             let i_end = out.len() - j;
@@ -37,9 +36,11 @@ fn pipe(
             Err(e) => return Err(e),
         }
     }
-    if tee && i < out.len() {
-        if let Err(e) = out_pipe.write_all(&out[i..]) {
-            eprintln!("Error writing to output stream: {}", e)
+    if let Some(ref mut out_pipe) = out_pipe {
+        if i < out.len() {
+            if let Err(e) = out_pipe.write_all(&out[i..]) {
+                eprintln!("Error writing to output stream: {}", e)
+            }
         }
     }
     Ok(out)
@@ -191,10 +192,18 @@ fn main() {
         Ok(p) => p,
         Err(e) => log_post_and_exit(&format!("Failed to spawn process: {}", e), EXIT_CODE),
     };
+
     let child_stdout = proc.stdout.take().unwrap();
     let child_stderr = proc.stderr.take().unwrap();
-    let stdout_thread = std::thread::spawn(move || pipe(child_stdout, std::io::stdout(), tee));
-    let stderr_thread = std::thread::spawn(move || pipe(child_stderr, std::io::stderr(), tee));
+
+    let pipe_stdout = if tee { Some(std::io::stdout()) } else { None };
+    let pipe_stderr = if tee { Some(std::io::stderr()) } else { None };
+
+    // Spawn threads for continuously reading from the child process's stdout and stderr. If
+    // tee is enabled forward the output to the processes pipes
+    let stdout_thread = std::thread::spawn(move || pipe(child_stdout, pipe_stdout));
+    let stderr_thread = std::thread::spawn(move || pipe(child_stderr, pipe_stderr));
+
     match proc.wait() {
         Ok(status) => {
             let out = match stdout_thread.join() {
