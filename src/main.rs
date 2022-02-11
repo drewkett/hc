@@ -190,7 +190,7 @@ fn main() {
     let mut ignore_code = std::env::var_os("HCP_IGNORE_CODE").is_some();
     let mut tee = std::env::var_os("HCP_TEE").is_some();
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
-        .filter(|&(ref k, _)| k != "HCP_ID" && k != "HCP_TEE")
+        .filter(|&(ref k, _)| k != "HCP_ID" && k != "HCP_TEE" && k != "HCP_IGNORE_CODE")
         .collect();
     let cmd = loop {
         match args.next() {
