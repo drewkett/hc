@@ -8,4 +8,4 @@ edition = "2021"
 
 [dependencies]
 bstr = "0.2"
-ureq = "2"
+ureq = "2.4.0"
