@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "hcp"
-version = "0.2.0-alpha1"
+version = "0.2.0"
 dependencies = [
  "bstr",
  "ureq",
