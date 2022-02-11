@@ -1,5 +1,5 @@
 [package]
-name = "hc"
+name = "hcp"
 version = "0.1.5"
 authors = ["Andrew Burkett <burkett.andrew@gmail.com>"]
 edition = "2021"

@@ -87,7 +87,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hc"
+name = "hcp"
 version = "0.1.5"
 dependencies = [
  "bstr",

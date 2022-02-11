@@ -68,16 +68,16 @@ fn read_to_end_tee(
 fn print_help() {
     eprintln!(
         "\
-hc [--hc-id HC_ID] [--hc-tee] [--hc-ignore-code] [cmd [args...]]
+hcp [--hcp-id HCP_ID] [--hcp-tee] [--hcp-ignore-code] [cmd [args...]]
 
-    HC_ID can be set using an environment variable
-    --hc-id HC_ID    Sets the healthchecks id. This can also be set using the
-                     environment variable HC_ID
-    --hc-ignore-code Ignore the return code from cmd. Also available using HC_IGNORE_CODE
-    --hc-tee         Controls whether to also output the cmd stdout/stderr to the local
+    HCP_ID can be set using an environment variable
+    --hcp-id HCP_ID    Sets the healthchecks id. This can also be set using the
+                     environment variable HCP_ID
+    --hcp-ignore-code Ignore the return code from cmd. Also available using HCP_IGNORE_CODE
+    --hcp-tee         Controls whether to also output the cmd stdout/stderr to the local
                      stdout/stderr. By default the output from the cmd will only get
                      passed as text to healthchecks. This option can also be enabled
-                     using the environment variable HC_TEE. Only the existance of the
+                     using the environment variable HCP_TEE. Only the existance of the
                      variable is checked
     [cmd [args...]]  If no command is passed, the healthcheck will be notified as a
                      success with the text 'No command given'
@@ -186,29 +186,29 @@ use internal::HealthCheck;
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    let mut hc_id = std::env::var_os("HC_ID");
-    let mut ignore_code = std::env::var_os("HC_IGNORE_CODE").is_some();
-    let mut tee = std::env::var_os("HC_TEE").is_some();
+    let mut hcp_id = std::env::var_os("HCP_ID");
+    let mut ignore_code = std::env::var_os("HCP_IGNORE_CODE").is_some();
+    let mut tee = std::env::var_os("HCP_TEE").is_some();
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
-        .filter(|&(ref k, _)| k != "HC_ID" && k != "HC_TEE")
+        .filter(|&(ref k, _)| k != "HCP_ID" && k != "HCP_TEE")
         .collect();
     let cmd = loop {
         match args.next() {
             Some(arg) => match arg.to_str() {
-                Some("--hc-id") => hc_id = args.next(),
-                Some("--hc-tee") => tee = true,
-                Some("--hc-ignore-code") => ignore_code = true,
+                Some("--hcp-id") => hcp_id = args.next(),
+                Some("--hcp-tee") => tee = true,
+                Some("--hcp-ignore-code") => ignore_code = true,
                 _ => break Some(arg),
             },
             None => break None,
         }
     };
-    let hc = match hc_id.as_ref() {
-        Some(hc_id) => match hc_id.to_str().and_then(HealthCheck::from_str) {
-            Some(hc_id) => hc_id,
+    let hc = match hcp_id.as_ref() {
+        Some(hcp_id) => match hcp_id.to_str().and_then(HealthCheck::from_str) {
+            Some(hcp_id) => hcp_id,
             None => {
-                let hc_id: &std::path::Path = hc_id.as_ref();
-                eprintln!("Healthcheck Id isn't a valid uuid '{}'", hc_id.display());
+                let hcp_id: &std::path::Path = hcp_id.as_ref();
+                eprintln!("Healthcheck Id isn't a valid uuid '{}'", hcp_id.display());
                 exit(1);
             }
         },
