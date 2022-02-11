@@ -19,10 +19,10 @@ hcp [--hcp-id HCP_ID] [--hcp-tee] [--hcp-ignore-code] [cmd [args...]]
                      success with the text 'No command given'
 ```
 
-# Build Instructions
+# Install instructions
 
-This utility is written in Rust. The normal build procedure is used
+This utility is written in Rust. The normal cargo install procedure works
 
 ```
-cargo build --release
+cargo install hcp
 ```
