@@ -34,9 +34,13 @@ fn read_to_end_tee(
                     // remaining is all the data that has been read to out but not yet
                     // written to wrtr
                     let remaining = &out[out_position..];
-                    match remaining.iter().rev().position(|&c| c == b'\n') {
+                    match remaining
+                        .iter()
+                        .rev()
+                        .position(|&c| c == b'\n' || c == b'\r')
+                    {
                         Some(j) => {
-                            let to_write = &remaining[..out.len() - j];
+                            let to_write = &remaining[..remaining.len() - j];
                             if let Err(e) = wrtr.write_all(to_write) {
                                 eprintln!("Error writing to output stream: {}", e)
                             }
