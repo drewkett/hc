@@ -1,6 +1,11 @@
 [package]
 name = "hcp"
 version = "0.1.5"
+description = "Utility for running and subprocess and pinging healthchecks.io with result"
+license = "MIT"
+documentation = "https://github.com/drewkett/hcp"
+homepage = "https://github.com/drewkett/hcp"
+repository = "https://github.com/drewkett/hcp"
 authors = ["Andrew Burkett <burkett.andrew@gmail.com>"]
 edition = "2021"
 
