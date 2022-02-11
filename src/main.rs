@@ -189,6 +189,7 @@ fn main() {
     let mut hcp_id = std::env::var_os("HCP_ID");
     let mut ignore_code = std::env::var_os("HCP_IGNORE_CODE").is_some();
     let mut tee = std::env::var_os("HCP_TEE").is_some();
+    // We want to keep all of the environment variables except those
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
         .filter(|&(ref k, _)| k != "HCP_ID" && k != "HCP_TEE" && k != "HCP_IGNORE_CODE")
         .collect();
@@ -207,6 +208,7 @@ fn main() {
         Some(hcp_id) => match hcp_id.to_str().and_then(HealthCheck::from_str) {
             Some(hcp_id) => hcp_id,
             None => {
+                // Use Path since it already has a Display implementation
                 let hcp_id: &std::path::Path = hcp_id.as_ref();
                 eprintln!("Healthcheck Id isn't a valid uuid '{}'", hcp_id.display());
                 exit(1);
