@@ -17,12 +17,8 @@ fn trim_trailing(buf: &[u8]) -> &[u8] {
         .unwrap_or_default()
 }
 
-/// This reads the rdr to the end and returns the data as a Vec. If a wrtr is passed
-/// in, also copy all data to wrtr
-fn read_to_end_tee(
-    mut rdr: impl std::io::Read,
-    mut wrtr: Option<impl std::io::Write>,
-) -> std::io::Result<Vec<u8>> {
+/// This reads the rdr to the end, copies the data to wrtr and returns the data as a Vec
+fn tee(mut rdr: impl std::io::Read, mut wrtr: impl std::io::Write) -> std::io::Result<Vec<u8>> {
     // This tracks the position in the out buffer that has been already forwarded to
     // wrtr, when a wrtr is passed
     let mut out_position = 0;
@@ -36,32 +32,28 @@ fn read_to_end_tee(
             Ok(n) => {
                 let read_contents = &buf[..n];
                 out.extend(read_contents);
-                if let Some(ref mut wrtr) = wrtr {
-                    // Only write contents up to last new line. Since both stdout and
-                    // stderr can be writing at the same time, attempt to line buffer
-                    // to make output look nicer
-                    // remaining is all the data that has been read to out but not yet
-                    // written to wrtr
-                    let remaining = &out[out_position..];
-                    let to_write = trim_trailing(remaining);
-                    if !to_write.is_empty() {
-                        if let Err(e) = wrtr.write_all(to_write) {
-                            eprintln!("Error writing to output stream: {}", e)
-                        }
-                        out_position += to_write.len();
+                // Only write contents up to last new line. Since both stdout and
+                // stderr can be writing at the same time, attempt to line buffer
+                // to make output look nicer
+                // remaining is all the data that has been read to out but not yet
+                // written to wrtr
+                let remaining = &out[out_position..];
+                let to_write = trim_trailing(remaining);
+                if !to_write.is_empty() {
+                    if let Err(e) = wrtr.write_all(to_write) {
+                        eprintln!("Error writing to output stream: {}", e)
                     }
+                    out_position += to_write.len();
                 }
             }
             Err(e) => return Err(e),
         }
     }
-    if let Some(ref mut wrtr) = wrtr {
-        // The read has finished, so write all remaining data to wrtr if exists
-        if out_position < out.len() {
-            let remaining = &out[out_position..];
-            if let Err(e) = wrtr.write_all(remaining) {
-                eprintln!("Error writing to output stream: {}", e)
-            }
+    // The read has finished, so write all remaining data to wrtr if exists
+    if out_position < out.len() {
+        let remaining = &out[out_position..];
+        if let Err(e) = wrtr.write_all(remaining) {
+            eprintln!("Error writing to output stream: {}", e)
         }
     }
     Ok(out)
@@ -190,7 +182,7 @@ fn main() {
     let mut args = std::env::args_os().skip(1);
     let mut hcp_id = std::env::var_os("HCP_ID");
     let mut ignore_code = std::env::var_os("HCP_IGNORE_CODE").is_some();
-    let mut tee = std::env::var_os("HCP_TEE").is_some();
+    let mut tee_output = std::env::var_os("HCP_TEE").is_some();
     // We want to keep all of the environment variables except those
     let filtered_env: HashMap<OsString, OsString> = std::env::vars_os()
         .filter(|&(ref k, _)| k != "HCP_ID" && k != "HCP_TEE" && k != "HCP_IGNORE_CODE")
@@ -199,7 +191,7 @@ fn main() {
         match args.next() {
             Some(arg) => match arg.to_str() {
                 Some("--hcp-id") => hcp_id = args.next(),
-                Some("--hcp-tee") => tee = true,
+                Some("--hcp-tee") => tee_output = true,
                 Some("--hcp-ignore-code") => ignore_code = true,
                 _ => break Some(arg),
             },
@@ -244,13 +236,39 @@ fn main() {
     let child_stdout = proc.stdout.take().unwrap();
     let child_stderr = proc.stderr.take().unwrap();
 
-    let pipe_stdout = if tee { Some(std::io::stdout()) } else { None };
-    let pipe_stderr = if tee { Some(std::io::stderr()) } else { None };
+    let pipe_stdout = if tee_output {
+        Some(std::io::stdout())
+    } else {
+        None
+    };
+    let pipe_stderr = if tee_output {
+        Some(std::io::stderr())
+    } else {
+        None
+    };
 
     // Spawn threads for continuously reading from the child process's stdout and stderr. If
-    // tee is enabled forward the output to the processes pipes
-    let stdout_thread = std::thread::spawn(move || read_to_end_tee(child_stdout, pipe_stdout));
-    let stderr_thread = std::thread::spawn(move || read_to_end_tee(child_stderr, pipe_stderr));
+    // tee_output is enabled forward the output to the processes pipes
+    let stdout_thread = std::thread::spawn(move || {
+        if let Some(pipe_stdout) = pipe_stdout {
+            tee(child_stdout, pipe_stdout)
+        } else {
+            use std::io::Read;
+            let mut child_stdout = child_stdout;
+            let mut buf = Vec::new();
+            child_stdout.read_to_end(&mut buf).map(|_| buf)
+        }
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        if let Some(pipe_stderr) = pipe_stderr {
+            tee(child_stderr, pipe_stderr)
+        } else {
+            use std::io::Read;
+            let mut child_stderr = child_stderr;
+            let mut buf = Vec::new();
+            child_stderr.read_to_end(&mut buf).map(|_| buf)
+        }
+    });
 
     match proc.wait() {
         Ok(status) => {
@@ -318,5 +336,20 @@ mod test {
         assert_eq!(trim_trailing(b"abc\r\ncd"), b"abc\r\n");
         assert_eq!(trim_trailing(b"abc\r\nabc\ncd"), b"abc\r\nabc\n");
         assert_eq!(trim_trailing(b"abc"), b"");
+    }
+
+    #[test]
+    fn test_tee() {
+        fn run_test(input: &[u8]) {
+            let input = input.to_vec();
+            let rdr = std::io::Cursor::new(&input);
+            let mut out_wrtr = Vec::new();
+            let out_returned = tee(rdr, &mut out_wrtr).unwrap();
+            assert_eq!(input, out_wrtr);
+            assert_eq!(input, out_returned);
+        }
+        run_test(b"abc\r\ncd\rfd");
+        run_test(b"");
+        run_test(b"abc");
     }
 }
