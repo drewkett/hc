@@ -89,7 +89,9 @@ mod internal {
             .all(|b| matches!(b, b'0'..=b'9'|b'a'..=b'z'|b'A'..=b'Z'))
     }
 
-    #[derive(Clone, Copy)]
+    /// A Uuid newtype wrapper, which checks validity on creation and leaves the uuid stored
+    /// as hex bytes
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct Uuid([u8; 36]);
 
     impl Uuid {
@@ -122,6 +124,7 @@ mod internal {
         }
     }
 
+    /// A wrapper struct to implement helper functions for pinging healthchecks.io
     #[derive(Clone, Copy)]
     pub struct HealthCheck(Uuid);
 
@@ -172,6 +175,30 @@ mod internal {
                 exit(EXIT_CODE)
             }
             exit(code)
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn test_uuid() {
+            fn should_be_none(value: &str) {
+                assert_eq!(Uuid::from_str(value), None)
+            }
+
+            fn should_be_some(value: &str) {
+                assert_eq!(
+                    Uuid::from_str(value).as_ref().map(|o| o.as_str()),
+                    Some(value)
+                )
+            }
+            should_be_some("abcdefgh-1234-5678-9012-ijklmnopqrst");
+            should_be_some("ABCDEFGH-1234-5678-9012-ijklmnopqrst");
+            should_be_none("ABCDEFGH-1234-5678-9012-ijklmnopqrstu");
+            should_be_none("ABCDEFGH0123415678190121ijklmnopqrst");
+            should_be_none("abcdef");
         }
     }
 }
