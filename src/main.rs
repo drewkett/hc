@@ -45,11 +45,11 @@ fn read_to_end_tee(
                     let remaining = &out[out_position..];
                     let to_write = trim_trailing(remaining);
                     if !to_write.is_empty() {
-                            if let Err(e) = wrtr.write_all(to_write) {
-                                eprintln!("Error writing to output stream: {}", e)
-                            }
-                            out_position += to_write.len();
+                        if let Err(e) = wrtr.write_all(to_write) {
+                            eprintln!("Error writing to output stream: {}", e)
                         }
+                        out_position += to_write.len();
+                    }
                 }
             }
             Err(e) => return Err(e),
@@ -88,8 +88,8 @@ hcp [--hcp-id HCP_ID] [--hcp-tee] [--hcp-ignore-code] [cmd [args...]]
 }
 
 mod internal {
+    use super::EXIT_CODE;
     use std::process::exit;
-    const EXIT_CODE: i32 = 963;
 
     /// Check if buf is only valid hex characters
     fn is_hex(buf: &[u8]) -> bool {
@@ -258,7 +258,7 @@ fn main() {
                 Ok(Ok(out)) => out,
                 Ok(Err(e)) => hc.finish_and_exit(
                     &format!("Error reading stdout from child: {}", e),
-                    693,
+                    EXIT_CODE,
                     false,
                 ),
                 Err(e) => std::panic::resume_unwind(e),
@@ -267,7 +267,7 @@ fn main() {
                 Ok(Ok(err)) => err,
                 Ok(Err(e)) => hc.finish_and_exit(
                     &format!("Error reading stderr from child: {}", e),
-                    693,
+                    EXIT_CODE,
                     false,
                 ),
                 Err(e) => std::panic::resume_unwind(e),
