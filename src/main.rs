@@ -17,13 +17,39 @@ fn trim_trailing(buf: &[u8]) -> &[u8] {
         .unwrap_or_default()
 }
 
+#[derive(Default)]
+struct TeeCursor {
+    position: usize,
+    inner: Vec<u8>
+}
+
+impl TeeCursor {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend(&mut self, buf: &[u8]) {
+        self.inner.extend(buf)
+    }
+
+    fn remaining(&mut self) -> &[u8] {
+        let pos = self.position.min(self.inner.len());
+        &self.inner[pos..]
+    }
+
+    fn advance(&mut self, n: usize) {
+        self.position += n;
+    }
+
+    fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+}
+
 /// This reads the rdr to the end, copies the data to wrtr and returns the data as a Vec
 fn tee(mut rdr: impl std::io::Read, mut wrtr: impl std::io::Write) -> std::io::Result<Vec<u8>> {
-    // This tracks the position in the out buffer that has been already forwarded to
-    // wrtr, when a wrtr is passed
-    let mut out_position = 0;
     // Buffer to return which captures all the data from rdr
-    let mut out = Vec::new();
+    let mut out = TeeCursor::new();
     // Temporary buffer used for read data
     let mut buf = [0; 16 * 1024];
     loop {
@@ -37,26 +63,23 @@ fn tee(mut rdr: impl std::io::Read, mut wrtr: impl std::io::Write) -> std::io::R
                 // to make output look nicer
                 // remaining is all the data that has been read to out but not yet
                 // written to wrtr
-                let remaining = &out[out_position..];
+                let remaining = out.remaining();
                 let to_write = trim_trailing(remaining);
                 if !to_write.is_empty() {
-                    if let Err(e) = wrtr.write_all(to_write) {
-                        eprintln!("Error writing to output stream: {}", e)
-                    }
-                    out_position += to_write.len();
+                    wrtr.write_all(to_write)?;
+                    let n_written = to_write.len();
+                    out.advance(n_written);
                 }
             }
             Err(e) => return Err(e),
         }
     }
     // The read has finished, so write all remaining data to wrtr if exists
-    if out_position < out.len() {
-        let remaining = &out[out_position..];
-        if let Err(e) = wrtr.write_all(remaining) {
-            eprintln!("Error writing to output stream: {}", e)
-        }
+    let remaining = out.remaining();
+    if !remaining.is_empty() {
+        wrtr.write_all(remaining)?;
     }
-    Ok(out)
+    Ok(out.into_inner())
 }
 
 fn print_help() {
