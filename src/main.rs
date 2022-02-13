@@ -8,6 +8,15 @@ use std::{
 
 const EXIT_CODE: i32 = 963;
 
+/// Trims everything after the last '\r' or '\n'
+fn trim_trailing(buf: &[u8]) -> &[u8] {
+    buf.iter()
+        .rev()
+        .position(|&c| c == b'\n' || c == b'\r')
+        .map(|i_end| buf.split_at(buf.len() - i_end).0)
+        .unwrap_or_default()
+}
+
 /// This reads the rdr to the end and returns the data as a Vec. If a wrtr is passed
 /// in, also copy all data to wrtr
 fn read_to_end_tee(
@@ -34,20 +43,13 @@ fn read_to_end_tee(
                     // remaining is all the data that has been read to out but not yet
                     // written to wrtr
                     let remaining = &out[out_position..];
-                    match remaining
-                        .iter()
-                        .rev()
-                        .position(|&c| c == b'\n' || c == b'\r')
-                    {
-                        Some(j) => {
-                            let to_write = &remaining[..remaining.len() - j];
+                    let to_write = trim_trailing(remaining);
+                    if !to_write.is_empty() {
                             if let Err(e) = wrtr.write_all(to_write) {
                                 eprintln!("Error writing to output stream: {}", e)
                             }
                             out_position += to_write.len();
                         }
-                        None => break,
-                    }
                 }
             }
             Err(e) => return Err(e),
@@ -304,5 +306,17 @@ fn main() {
             let msg = format!("Failed waiting for process: {}", e);
             hc.finish_and_exit(&msg, EXIT_CODE, true)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_trim_trailing() {
+        assert_eq!(trim_trailing(b"abc\r\ncd"), b"abc\r\n");
+        assert_eq!(trim_trailing(b"abc\r\nabc\ncd"), b"abc\r\nabc\n");
+        assert_eq!(trim_trailing(b"abc"), b"");
     }
 }
